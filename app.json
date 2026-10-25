@@ -1,0 +1,18 @@
+
+{
+  "expo": {
+    "name": "Nova Chat",
+    "slug": "nova-chat",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.novachat.app"
+    },
+    "android": {
+      "package": "com.novachat.app"
+    }
+  }
+}
