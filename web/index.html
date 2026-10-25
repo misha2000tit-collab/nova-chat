@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nova Chat</title>
+<style>
+*{box-sizing:border-box}
+:root{font-family:Arial,sans-serif}
+body{margin:0;background:#0d0d16;color:#fff;transition:.2s}
+body.light{background:#f2f3fa;color:#202033}
+main{max-width:520px;margin:25px auto;padding:16px}
+.card{background:#171725;border:1px solid #292940;border-radius:20px;padding:22px;transition:.2s}
+body.light .card{background:#fff;border-color:#dedee9}
+h1{color:#a78bfa;margin:0 0 10px}
+p{color:#aaa;line-height:1.5}
+body.light p,body.light .small{color:#68687a}
+input,button{width:100%;padding:14px;margin-top:10px;border-radius:11px;font-size:15px}
+input{background:#10101b;color:white;border:1px solid #39394e;outline:none}
+body.light input{background:#f8f8fc;color:#202033;border-color:#d5d5e2}
+button{background:#8b5cf6;color:white;border:0;font-weight:bold;cursor:pointer}
+button:active{opacity:.8}
+.secondary{background:#29293b}
+body.light .secondary{background:#e8e7f1;color:#303044}
+.topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:15px}
+.brand{font-size:24px;font-weight:bold;color:#a78bfa}
+.theme{width:auto;margin:0;padding:10px 13px;white-space:nowrap}
+#chat{display:none}
+#messages{height:300px;overflow-y:auto;background:#10101b;border-radius:12px;padding:12px;margin:15px 0}
+body.light #messages{background:#f0f0f7}
+.msg{padding:10px 12px;background:#29293b;border-radius:12px;margin:8px 0;overflow-wrap:anywhere}
+body.light .msg{background:#e4e4ef;color:#202033}
+.msg.mine{background:#7044d6;color:white;margin-left:20px}
+body.light .msg.mine{background:#d9c8ff;color:#30204f}
+.small{font-size:13px;color:#aaa;overflow-wrap:anywhere}
+.row{display:flex;gap:8px;align-items:center}
+.row input{flex:1;min-width:0}
+.row button{width:auto;flex-shrink:0}
+</style>
+</head>
+<body>
+<main>
+  <div class="topbar">
+    <div class="brand">✦ Nova Chat</div>
+    <button id="themeToggle" class="secondary theme" type="button">🌙 Тёмная</button>
+  </div>
+  <section class="card" id="auth">
+    <h2>Добро пожаловать</h2>
+    <p>Войди или создай аккаунт, чтобы общаться.</p>
+    <input id="email" type="email" placeholder="Электронная почта" autocomplete="email">
+    <input id="password" type="password" placeholder="Пароль (минимум 6 символов)" autocomplete="current-password">
+    <button id="loginBtn" type="button">Войти</button>
+    <button id="signupBtn" class="secondary" type="button">Создать аккаунт</button>
+    <p id="status" class="small">Nova Chat — общайся без границ.</p>
+  </section>
+  <section class="card" id="chat">
+    <h2>Сообщения</h2>
+    <p id="who" class="small"></p>
+    <input id="recipient" type="email" placeholder="Почта собеседника">
+    <div id="messages"></div>
+    <div class="row">
+      <input id="message" placeholder="Напиши сообщение..." maxlength="2000">
+      <button id="sendBtn" type="button" aria-label="Отправить">➤</button>
+    </div>
+    <p id="chatStatus" class="small"></p>
+    <button id="logoutBtn" class="secondary" type="button">Выйти</button>
+  </section>
+</main>
+<script type="module">
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+const SUPABASE_URL = 'https://uuxwqxhozanzyaamfthl.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_836k-ZpW3Frp16iLQxhkoQ_W_j0VUCo';
+const db = createClient(SUPABASE_URL, SUPABASE_KEY);
+const el = id => document.getElementById(id);
+let currentUser = null;
+let pollTimer = null;
+let lastChatKey = '';
+function setStatus(message) {
+  el('status').textContent = message;
+}
+function setChatStatus(message) {
+  el('chatStatus').textContent = message;
+}
+// Переключение темы с сохранением выбора
+function updateTheme(light) {
+  document.body.classList.toggle('light', light);
+  el('themeToggle').textContent = light ? '☀️ Светлая' : '🌙 Тёмная';
+  try {
+    localStorage.setItem('nova-theme', light ? 'light' : 'dark');
+  } catch {}
+}
+try {
+  updateTheme(localStorage.getItem('nova-theme') === 'light');
+} catch {
+  updateTheme(false);
+}
+el('themeToggle').addEventListener('click', () => {
+  updateTheme(!document.body.classList.contains('light'));
+});
+async function signUp() {
+  const email = el('email').value.trim();
+  const password = el('password').value;
+  if (!email || password.length < 6) {
+    setStatus('Введи почту и пароль минимум из 6 символов.');
+    return;
+  }
+  setStatus('Создаём аккаунт...');
+  const { data, error } = await db.auth.signUp({ email, password });
+  if (error) {
+    setStatus(error.message);
+    return;
+  }
+  if (!data.session) {
+    setStatus('Аккаунт создан! Проверь почту и подтверди регистрацию, если это требуется.');
+  } else {
+    currentUser = data.user;
+    showChat();
+  }
+}
+async function signIn() {
+  const email = el('email').value.trim();
+  const password = el('password').value;
+  if (!email || !password) {
+    setStatus('Введи почту и пароль.');
+    return;
+  }
+  setStatus('Входим...');
+  const { data, error } = await db.auth.signInWithPassword({ email, password });
+  if (error) {
+    setStatus(error.message);
+    return;
+  }
+  currentUser = data.user;
+  showChat();
+}
+function showChat() {
+  el('auth').style.display = 'none';
+  el('chat').style.display = 'block';
+  el('who').textContent = 'Ты вошёл как ' + currentUser.email;
+  loadMessages();
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(loadMessages, 4000);
+}
+async function signOut() {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = null;
+  const { error } = await db.auth.signOut();
+  if (error) setChatStatus(error.message);
+  currentUser = null;
+  lastChatKey = '';
+  el('messages').replaceChildren();
+  el('chat').style.display = 'none';
+  el('auth').style.display = 'block';
+  setStatus('Ты вышел из аккаунта.');
+}
+async function loadMessages() {
+  if (!currentUser) return;
+  const target = el('recipient').value.trim().toLowerCase();
+  if (!target) {
+    el('messages').replaceChildren();
+    lastChatKey = '';
+    setChatStatus('Введи почту собеседника.');
+    return;
+  }
+  if (target === currentUser.email.toLowerCase()) {
+    setChatStatus('Укажи почту другого пользователя.');
+    return;
+  }
+  const { data, error } = await db.from('messages')
+    .select('id,sender_email,receiver_email,content,created_at')
+    .or(
+      `and(sender_email.eq.${currentUser.email},receiver_email.eq.${target}),and(sender_email.eq.${target},receiver_email.eq.${currentUser.email})`
+    )
+    .order('created_at', { ascending: true });
+  if (error) {
+    setChatStatus('Ошибка загрузки: ' + error.message);
+    return;
+  }
+  const key = currentUser.email.toLowerCase() + '|' + target;
+  if (key !== lastChatKey) {
+    el('messages').replaceChildren();
+    lastChatKey = key;
+  }
+  const box = el('messages');
+  box.replaceChildren();
+  for (const m of data || []) {
+    const div = document.createElement('div');
+    const mine = m.sender_email.toLowerCase() === currentUser.email.toLowerCase();
+    div.className = 'msg' + (mine ? ' mine' : '');
+    div.textContent = (mine ? 'Ты' : m.sender_email) + ': ' + m.content;
+    box.appendChild(div);
+  }
+  box.scrollTop = box.scrollHeight;
+  setChatStatus('Сообщения обновлены.');
+}
+async function sendMessage() {
+  if (!currentUser) return;
+  const target = el('recipient').value.trim().toLowerCase();
+  const content = el('message').value.trim();
+  if (!target || !content) {
+    setChatStatus('Укажи почту собеседника и текст сообщения.');
+    return;
+  }
+  if (target === currentUser.email.toLowerCase()) {
+    setChatStatus('Укажи почту другого пользователя.');
+    return;
+  }
+  const { error } = await db.from('messages').insert({
+    sender_email: currentUser.email,
+    receiver_email: target,
+    content
+  });
+  if (error) {
+    setChatStatus('Ошибка отправки: ' + error.message);
+    return;
+  }
+  el('message').value = '';
+  await loadMessages();
+}
+el('loginBtn').addEventListener('click', signIn);
+el('signupBtn').addEventListener('click', signUp);
+el('sendBtn').addEventListener('click', sendMessage);
+el('logoutBtn').addEventListener('click', signOut);
+el('recipient').addEventListener('change', loadMessages);
+el('message').addEventListener('keydown', e => {
+  if (e.key === 'Enter') sendMessage();
+});
+const { data: sessionData } = await db.auth.getSession();
+if (sessionData.session) {
+  currentUser = sessionData.session.user;
+  showChat();
+}
+</script>
+</body>
+</html>
